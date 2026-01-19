@@ -207,7 +207,7 @@ async def get_html_part_handler(
 
 @tool("save_state", parse_docstring=True)  # type: ignore  # noqa: PGH003
 @log_tool_call("save_state")
-async def save_state(
+async def save_state(  # noqa: RUF029
     runtime: ToolRuntime,
     url: str,
     navigate: str,

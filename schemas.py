@@ -100,4 +100,3 @@ class State(AgentState):
     evaluate: str
     get_html_content: str
     get_html_part: str
-    gpu: ChoiseGPU
