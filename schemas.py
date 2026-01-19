@@ -1,21 +1,6 @@
-from typing import Any
-
 from langchain.agents import AgentState
+from playwright.async_api import Page
 from pydantic import BaseModel, Field
-
-
-class State(AgentState):
-    url: str | None
-    browser: Any | None
-    page: Any | None
-    navigate: str | None
-    click: str | None
-    fill: str | None
-    evaluate: str | None
-    click_text: str | None
-    get_text_content: str | None
-    get_html_content: str | None
-    get_html_part: str | None
 
 
 class ChoiseGPU(BaseModel):
@@ -104,3 +89,15 @@ class ServerAnalysisResponse(BaseModel):
     ideal_use_cases: list[str] = Field(..., description="Идеальные варианты использования")
     limitations: list[str] = Field(..., description="Ограничения и риски")
     upgrade_paths: list[str] | None = Field(None, description="Возможные пути улучшения")
+
+
+class State(AgentState):
+    page: Page
+    url: str
+    navigate: str
+    click: str
+    fill: str
+    evaluate: str
+    get_html_content: str
+    get_html_part: str
+    gpu: ChoiseGPU

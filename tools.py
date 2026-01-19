@@ -5,18 +5,17 @@ import time
 from collections.abc import Callable
 from functools import wraps
 
-from langchain.tools import tool
+from langchain.tools import ToolRuntime, tool
+from langgraph.types import Command
 
-from mcp_ import click, evaluate, fill, get_html_content, get_html_part, navigate, new_session
-from schemas import State
+from mcp_ import click, evaluate, fill, get_html_content, get_html_part, navigate
 
 logger = logging.getLogger(__name__)
 RESULT_PREVIEW_CHARS = 1000
 
 
 def log_tool_call(tool_name: str | None = None):
-    """
-    Декоратор для логирования вызовов инструментов (тулов).
+    """Декоратор для логирования вызовов инструментов (тулов).
 
     Записывает в лог:
     - Начало выполнения инструмента
@@ -38,7 +37,6 @@ def log_tool_call(tool_name: str | None = None):
             tool_id = tool_name or func.__name__
             start_time = time.time()
 
-            # Логирование начала вызова инструмента
             logger.info(
                 "🛠️ TOOL CALL START: %s",
                 tool_id,
@@ -51,18 +49,15 @@ def log_tool_call(tool_name: str | None = None):
             )
 
             try:
-                # Выполнение основной функции инструмента
                 result = await func(*args, **kwargs)
                 execution_time = round(time.time() - start_time, 2)
 
-                # Формирование предпросмотра результата (ограниченной длины)
                 result_preview = (
                     str(result)[:RESULT_PREVIEW_CHARS] + "..."
                     if len(str(result)) > RESULT_PREVIEW_CHARS
                     else str(result)
                 )
 
-                # Логирование успешного выполнения
                 logger.info(
                     "✅ TOOL CALL SUCCESS: %s (%s s)",
                     tool_id,
@@ -76,7 +71,6 @@ def log_tool_call(tool_name: str | None = None):
                     },
                 )
             except Exception as e:
-                # Логирование ошибки при выполнении
                 execution_time = round(time.time() - start_time, 2)
                 logger.exception(
                     "❌ TOOL CALL FAILED: %s (%s s)",
@@ -98,185 +92,172 @@ def log_tool_call(tool_name: str | None = None):
     return decorator
 
 
-@tool("new_session_handler")  # Декоратор LangChain для регистрации инструмента
-@log_tool_call("new_session_handler")  # Применение декоратора логирования
-async def new_session_handler(state: State, url: str) -> str:
-    """
-    Создает новую сессию браузера для автоматизации веб-страниц.
-    Запускает браузер Chrome и открывает новую страницу.
-
-    Параметры:
-        - state (State): Состояние сессии, содержит контекст браузера и страницы
-        - url (str): URL для первоначальной навигации.
-          Если не указан, откроется пустая страница.
-          Если URL не начинается с http:// или https://, автоматически добавляется https://
-
-    Возвращает:
-        dict: Успешное сообщение о создании сессии.
-    Пример: {"url": "google.com"}
-    """
-    print(state)
-    return await new_session(state, url)
-
-
-@tool("navigate_handler")
+@tool("navigate_handler", parse_docstring=True)
 @log_tool_call("navigate_handler")
-async def navigate_handler(state: State) -> str:
-    """
-    Переходит по указанному URL в текущей активной сессии браузера.
+async def navigate_handler(
+    runtime: ToolRuntime, part: Literal["header", "body", "footer"]
+) -> dict:
+    """Переходит по указанному URL в текущей активной сессии браузера.
+
     Если нет активной сессии, создает новую.
 
-    Параметры:
-        - state (State): Состояние сессии
-        - url (str): URL для навигации.
-          Если URL не начинается с http:// или https://, автоматически добавляется https://
+    Args:
+        runtime (ToolRuntime): Объект ToolRuntime, содержащий состояние сессии.
+        part (Literal["header", "body", "footer"]): Часть страницы для извлечения.
 
-    Возвращает:
-        dict: Сообщение о навигации и первые 200 символов текстового содержимого страницы.
-    Пример: {"url": "https://example.com"}
+    Returns:
+        dict: Сообщение о навигации и первые 200 символов текстового содержимого
+            страницы.
     """
-    print(state)
-    return await navigate(state)
+
+    return await navigate(url=runtime.state["url"], part=part, page=runtime.state["page"])
 
 
-@tool("click_handler")
+@tool("click_handler", parse_docstring=True)
 @log_tool_call("click_handler")
-async def click_handler(name: str, state: State) -> str:
-    """
-    Кликает на элемент страницы по CSS-селектору.
+async def click_handler(runtime: ToolRuntime, name: str) -> dict:
+    """Кликает на элемент страницы по CSS-селектору.
+
     Ожидает открытия новых страниц после клика и автоматически переключается на них.
 
-    Параметры:
-        - name (str): CSS-селектор элемента для клика (переименованный параметр для совместимости)
-        - state (State): Состояние сессии
+    Args:
+        name (str): CSS-селектор элемента для клика (переименованный параметр для совместимости).
+        runtime (ToolRuntime): Объект ToolRuntime, содержащий состояние сессии.
 
-    Возвращает:
+    Returns:
         dict: Подтверждение клика с указанием селектора.
-    Пример: {"selector": "button.submit"}
     """
-    print(state)
-    return await click(state=state, str_=name)
+
+    return await click(page=runtime.state["page"], selector=name)
 
 
-# Закомментированный инструмент для клика по тексту
-# @tool("click_text_handler")
-# @log_tool_call("click_text_handler")
-# async def click_text_handler(name: str, arguments: dict | None) -> list[TextContent]:
-#     """
-#     Кликает на элемент по текстовому содержимому.
-#     Ищет элемент, содержащий указанный текст, и кликает на первый найденный.
-#     Ожидает открытия новых страниц после клика.
-#
-#     Параметры:
-#         - text (str, обязательно): Текст элемента для клика.
-#
-#     Возвращает: Подтверждение клика с указанием текста.
-#     Пример: {"text": "Войти"}
-#     """
-#     return await ClickTextToolHandler().handle(name, arguments)
-
-
-@tool("fill_handler")
+@tool("fill_handler", parse_docstring=True)
 @log_tool_call("fill_handler")
-async def fill_handler(state: State, selector: str, value: str) -> str:
-    """
-    Заполняет поле ввода (input, textarea) указанным значением.
+async def fill_handler(runtime: ToolRuntime, selector: str, value: str) -> dict:
+    """Заполняет поле ввода (input, textarea) указанным значением.
 
-    Параметры:
-        - state (State): Состояние сессии
-        - selector (str): CSS-селектор поля ввода
-        - value (str): Значение для ввода в поле
+    Args:
+        runtime (ToolRuntime): Объект ToolRuntime, содержащий состояние сессии.
+        selector (str): CSS-селектор поля ввода.
+        value (str): Значение для ввода в поле.
 
-    Возвращает:
+    Returns:
         dict: Подтверждение заполнения с указанием селектора и значения.
-    Пример: {"selector": "#search-input", "value": "Python программирование"}
     """
-    print(state)
-    return await fill(state, selector, value)
+
+    return await fill(page=runtime.state["page"], selector=selector, value=value)
 
 
-@tool("evaluate_handler")
+@tool("evaluate_handler", parse_docstring=True)
 @log_tool_call("evaluate_handler")
-async def evaluate_handler(state: State, script: str) -> str:
-    """
-    Выполняет JavaScript код на текущей странице.
+async def evaluate_handler(runtime: ToolRuntime, script: str) -> dict:
+    """Выполняет JavaScript код на текущей странице.
+
     Полезно для извлечения данных или выполнения сложных операций.
 
-    Параметры:
-        - state (State): Состояние сессии
-        - script (str): JavaScript код для выполнения.
+    Args:
+        runtime (ToolRuntime): Объект ToolRuntime, содержащий состояние сессии.
+        script (str): JavaScript код для выполнения.
 
-    Возвращает:
+    Returns:
         dict: Результат выполнения скрипта.
-    Пример: {"script": "document.title"}
     """
-    print(state)
-    return await evaluate(state, script)
+
+    return await evaluate(page=runtime.state["page"], script=script)
 
 
-# Закомментированный инструмент для получения текстового содержимого
-# @tool("get_text_handler")
-# @log_tool_call("get_text_handler")
-# async def get_text_handler(
-#     name: str, arguments: dict | None
-# ) -> str:
-#     """
-#     Получает текстовое содержимое всех видимых элементов страницы.
-#     Фильтрует дубликаты и элементы с большим количеством дочерних элементов.
-#
-#     Параметры:
-#         - (нет обязательных параметров)
-#
-#     Возвращает: Список уникальных текстовых элементов страницы.
-#     Пример: {} или {"dummy": "value"} если аргументы требуются формально
-#     """
-#     return await GetTextContentToolHandler().handle(name, arguments)
-
-
-@tool("get_html_handler")
+@tool("get_html_handler", parse_docstring=True)
 @log_tool_call("get_html_handler")
-async def get_html_handler(state: State, selector: str) -> str:
-    """
-    Получает HTML содержимое конкретного элемента по CSS-селектору.
+async def get_html_handler(runtime: ToolRuntime, selector: str) -> dict:
+    """Получает HTML содержимое конкретного элемента по CSS-селектору.
 
-    Параметры:
-        - state (State): Состояние сессии
-        - selector (str): CSS-селектор элемента.
+    Args:
+        runtime (ToolRuntime): Объект ToolRuntime, содержащий состояние сессии.
+        selector (str): CSS-селектор элемента.
 
-    Возвращает:
+    Returns:
         dict: HTML содержимое выбранного элемента.
-    Пример: {"selector": "div.content"}
     """
-    print(state)
-    return await get_html_content(state, selector)
+
+    return await get_html_content(page=runtime.state["page"], selector=selector)
 
 
-@tool("get_html_part_handler")
+@tool("get_html_part_handler", parse_docstring=True)
 @log_tool_call("get_html_part_handler")
-async def get_html_part_handler(part: Literal["header", "body", "footer"], state: State) -> str:
-    """
-    Извлекает HTML-содержимое определенной структурной части веб-страницы.
+async def get_html_part_handler(
+    runtime: ToolRuntime,
+    part: Literal["header", "body", "footer"],
+) -> dict:
+    """Извлекает HTML-содержимое определенной структурной части веб-страницы.
 
-    Этот инструмент предназначен для получения одной из основных структурных частей HTML-документа:
-    header (верхний колонтитул), body (основное содержимое) или footer (нижний колонтитул).
+    Этот инструмент предназначен для получения одной из основных структурных частей
+    HTML-документа: header (верхний колонтитул), body (основное содержимое) или
+    footer (нижний колонтитул).
 
-    Параметры:
-        - part (Literal["header", "body", "footer"]): Часть страницы для извлечения
-        - state (State): Состояние сессии
+    Args:
+        part (Literal["header", "body", "footer"]): Часть страницы для извлечения.
+        runtime (ToolRuntime): Объект ToolRuntime, содержащий состояние сессии.
 
-    Возвращает:
+    Returns:
         dict: HTML-содержимое запрошенной части страницы или сообщение об ошибке.
     """
-    print(state)
-    return await get_html_part(state, part)
+
+    return await get_html_part(page=runtime.state["page"], part=part)
+
+
+@tool("save_state", parse_docstring=True)  # type: ignore  # noqa: PGH003
+@log_tool_call("save_state")
+async def save_state(
+    runtime: ToolRuntime,
+    url: str,
+    navigate: str,
+    click: str,
+    fill: str,
+    evaluate: str,
+    get_html_content: str,
+    get_html_part: str,
+) -> Command:
+    """Сохраняет текущее состояние сессии для последующего использования.
+
+    Этот инструмент фиксирует текущее состояние браузерной сессии, включая контекст
+    страницы, историю навигации и другие параметры. Сохраненное состояние может быть
+    использовано для восстановления сессии или передачи состояния между различными
+    компонентами системы.
+
+    Args:
+        runtime (ToolRuntime): Объект ToolRuntime, содержащий состояние сессии.
+        url (str): URL текущей страницы.
+        navigate (str): Информация о последней навигации.
+        fill (str): Информация о заполненных полях.
+        evaluate (str): Результаты выполнения JavaScript.
+        click (str): Информация о кликах по тексту.
+        get_html_content (str): HTML содержимое элементов.
+        get_html_part (str): Части HTML страницы.
+
+    Returns:
+        Command: с обновленным состоянием.
+    """
+
+    return Command(
+        update={
+            "page": runtime.state["page"],
+            "url": url,
+            "navigate": navigate,
+            "click": click,
+            "fill": fill,
+            "evaluate": evaluate,
+            "get_html_content": get_html_content,
+            "get_html_part": get_html_part,
+        }
+    )
 
 
 mcp_tools = [
-    new_session_handler,
     navigate_handler,
     click_handler,
     fill_handler,
     evaluate_handler,
     get_html_handler,
     get_html_part_handler,
+    save_state,
 ]

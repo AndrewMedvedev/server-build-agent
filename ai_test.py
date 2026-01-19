@@ -1,109 +1,48 @@
-from typing import Any
+from typing import Literal
 
-import asyncio
-import logging
-import time
-from collections.abc import Callable
-from functools import wraps
+from asyncio import run
 
-from langchain.agents import create_agent
-from langchain.tools import tool
+from bs4 import BeautifulSoup
+from playwright.async_api import Page, async_playwright
 
-from crawler import crawl_web_page
-from depends import yandex_gpt
-from prompts import PROMPT_SEARCH
-from test_ import search_async
-
-logger = logging.getLogger(__name__)
-RESULT_PREVIEW_CHARS = 1000
+from utils import clean_html
 
 
-def log_tool_call(tool_name: str | None = None):
-    """Декоратор для логирования вызовов инструментов"""
-
-    def decorator(func: Callable) -> Callable:
-        @wraps(func)
-        def wrapper(*args, **kwargs):
-            tool_id = tool_name or func.__name__
-            start_time = time.time()
-            logger.info(
-                "🛠️ TOOL CALL START: %s",
-                tool_id,
-                extra={
-                    "tool": tool_id,
-                    "input_args": args,
-                    "input_kwargs": kwargs,
-                    "timestamp": start_time,
-                },
-            )
-            try:
-                result = func(*args, **kwargs)
-                execution_time = round(time.time() - start_time, 2)
-                result_preview = (
-                    str(result)[:RESULT_PREVIEW_CHARS] + "..."
-                    if len(str(result)) > RESULT_PREVIEW_CHARS
-                    else str(result)
-                )
-                logger.info(
-                    "✅ TOOL CALL SUCCESS: %s (%s s)",
-                    tool_id,
-                    execution_time,
-                    extra={
-                        "tool": tool_id,
-                        "execution_time": execution_time,
-                        "result_preview": result_preview,
-                        "result_type": type(result).__name__,
-                        "result_length": len(str(result)) if hasattr(result, "__len__") else None,
-                    },
-                )
-            except Exception as e:
-                execution_time = round(time.time() - start_time, 2)
-                logger.exception(
-                    "❌ TOOL CALL FAILED: %s (%s s)",
-                    tool_id,
-                    execution_time,
-                    extra={
-                        "tool": tool_id,
-                        "error": str(e),
-                        "error_type": type(e).__name__,
-                        "execution_time": execution_time,
-                    },
-                )
-                raise
-            else:
-                return result
-
-        return wrapper
-
-    return decorator
+async def get_html_part(part: Literal["header", "body", "footer"], page: Page | None) -> dict:
+    if page is None:
+        print("w vk keve")
+        return {"get_html_part": "No active session. Please create a new session first."}
+    html_content = await page.content()
+    print(page.content())
+    soup = BeautifulSoup(html_content, "html.parser")
+    print(soup)
+    find_part = soup.find(part)
+    print(find_part)
+    if find_part:
+        clean = clean_html(str(find_part))
+        print({"get_html_part": f"HTML content of element with {part}: {clean}", "page": page})
+        return {"get_html_part": f"HTML content of element with {part}: {clean}", "page": page}
+    print({"get_html_part": f"Not find {part}", "page": page})
+    return {"get_html_part": f"Not find {part}", "page": page}
 
 
-@tool(
-    "web_search",
-    description="""Выполняет поиск в Яндекс. Поисковик.
-    Возвращает список найденных страниц с заголовками, URL и кратким описанием.
-    Подходит для получения актуальной информации из интернета.""",
-)
-def web_search(search_query: str) -> list[dict[str, Any]]:
-    """Выполняет поиск информации в интернете"""
-
-    return asyncio.run(search_async(search_query))
-
-
-@tool(
-    "browse_web_page",
-    description="Открывает WEB-страницу и получает её контент в формате Markdown",
-)
-@log_tool_call("browse_web_page")
-def browse_link(link: str) -> str:
-    """Просматривает WEB-страницу по ссылке"""
-
-    try:
-        return asyncio.run(crawl_web_page(link))
-    except Exception:  # noqa: BLE001
-        return "Не удалось открыть страницу"
+async def new_session(
+    url: str,
+) -> tuple:
+    playw = await async_playwright().start()
+    browser = await playw.chromium.launch(headless=False)
+    page = await browser.new_page()
+    if not url.startswith("http://") and not url.startswith("https://"):
+        url = "https://" + url
+    await page.goto(url)
+    return url, page
 
 
-lalal = create_agent(model=yandex_gpt, tools=[browse_link, web_search])
+async def main():
+    url, page = await new_session("arsplus.ru")
 
-print(lalal.invoke(PROMPT_SEARCH))
+    result = await get_html_part("body", page)
+    print(result)
+
+
+result = run(main())

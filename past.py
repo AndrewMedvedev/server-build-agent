@@ -6,7 +6,7 @@ from collections.abc import Callable
 
 from bs4 import BeautifulSoup
 from mcp.types import TextContent
-from playwright.async_api import Page, Playwright, async_playwright
+from playwright.async_api import Page, async_playwright
 
 from depends import text_splitter
 from utils import clean_html
@@ -39,7 +39,6 @@ def update_page_after_click(func: Callable):
 
 class ToolHandler:
     _sessions: ClassVar[dict] = {}
-    _playwright: Playwright | None = None
 
 
 class NewSessionToolHandler(ToolHandler):
@@ -47,8 +46,8 @@ class NewSessionToolHandler(ToolHandler):
         self,
         arguments: dict | None,
     ) -> str:
-        self._playwright = await async_playwright().start()
-        browser = await self._playwright.chromium.launch(headless=False)
+        _playwright = await async_playwright().start()
+        browser = await _playwright.chromium.launch(headless=False)
         page = await browser.new_page()
         session_id = str(uuid.uuid4())
         self._sessions[session_id] = {"browser": browser, "page": page}
@@ -66,6 +65,7 @@ class NavigateToolHandler(ToolHandler):
         self,
         arguments: dict | None,
     ) -> str:
+        print(self._sessions)
         if not self._sessions:
             await NewSessionToolHandler().handle({})
         session_id = list(self._sessions.keys())[-1]
@@ -83,6 +83,7 @@ class NavigateToolHandler(ToolHandler):
 class ClickToolHandler(ToolHandler):
     @update_page_after_click
     async def handle(self, arguments: dict | None) -> str:
+        print(self._sessions)
         if not self._sessions:
             return "No active session"
 
@@ -116,6 +117,7 @@ class FillToolHandler(ToolHandler):
         self,
         arguments: dict | None,
     ) -> str:
+        print(self._sessions)
         if not self._sessions:
             return "No active session. Please create a new session first."
 
@@ -133,6 +135,7 @@ class EvaluateToolHandler(ToolHandler):
         self,
         arguments: dict | None,
     ) -> str:
+        print(self._sessions)
         if not self._sessions:
             return "No active session. Please create a new session first."
         session_id = list(self._sessions.keys())[-1]
@@ -146,6 +149,7 @@ class EvaluateToolHandler(ToolHandler):
 class ClickTextToolHandler(ToolHandler):
     @update_page_after_click
     async def handle(self, arguments: dict | None) -> str:
+        print(self._sessions)
         if not self._sessions:
             return "No active session. Please create a new session first."
 
@@ -183,6 +187,7 @@ class GetTextContentToolHandler(ToolHandler):
         self,
         arguments: dict | None,  # noqa: ARG002
     ) -> str:
+        print(self._sessions)
         if not self._sessions:
             return "No active session. Please create a new session first."
 
@@ -223,6 +228,7 @@ class GetHtmlContentToolHandler(ToolHandler):
         self,
         arguments: dict | None,
     ) -> str:
+        print(self._sessions)
         if not self._sessions:
             return "No active session. Please create a new session first."
 
@@ -244,6 +250,7 @@ class GetHtmlPartToolHandler(ToolHandler):
         self,
         part: Literal["header", "body", "footer"],
     ) -> str:
+        print(self._sessions)
         if not self._sessions:
             return "No active session. Please create a new session first."
         session_id = list(self._sessions.keys())[-1]
@@ -266,16 +273,6 @@ from collections.abc import Callable
 from functools import wraps
 
 from langchain.tools import tool
-
-from mcp_ import (
-    ClickToolHandler,
-    EvaluateToolHandler,
-    FillToolHandler,
-    GetHtmlContentToolHandler,
-    GetHtmlPartToolHandler,
-    NavigateToolHandler,
-    NewSessionToolHandler,
-)
 
 logger = logging.getLogger(__name__)
 RESULT_PREVIEW_CHARS = 1000
